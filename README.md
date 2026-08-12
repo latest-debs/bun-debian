@@ -36,14 +36,14 @@ desired upstream version (e.g. `bun-v1.3.14` — note bun's tags include a
 `bun-` prefix). Packaging is driven by
 [debian-multiarch-builder](https://github.com/ranjithrajv/debian-multiarch-builder).
 
-## Maintainers wanted
+## Collaborate with us
 
-This package doesn't have a dedicated maintainer yet — **we'd love for you
-to sign up!** Maintaining just means keeping an eye on new upstream
-releases and build breaks; the build itself is automated. Interested? Open
-an issue on this repo to volunteer, or say hello in
-[org discussions](https://github.com/orgs/latest-debs/discussions) — all
-skill levels welcome.
+latest-debs is a community effort — nobody "owns" this package and there's
+no application to fill out. If you rely on it and want to help keep it
+fresh, watching for a new upstream release or fixing a build hiccup, jump
+in. Open an issue, send a PR, or drop into
+[org discussions](https://github.com/orgs/latest-debs/discussions). Every
+bit of help keeps this useful for everyone else who `apt install`s it.
 
 ## Disclaimer
 
