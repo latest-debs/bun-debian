@@ -1,0 +1,16 @@
+# Package definition for bun
+
+package_name: bun
+github_repo: oven-sh/bun
+artifact_format: zip
+description: "Incredibly fast JavaScript runtime, bundler, test runner, and package manager - all in one"
+
+# bun only publishes amd64/arm64 Linux builds, and each release also
+# contains -android/-baseline/-profile/-musl variants that match the same
+# architecture patterns as the plain glibc builds - auto-discovery would
+# be ambiguous, so release patterns are pinned explicitly here.
+architectures:
+  amd64:
+    release_pattern: "bun-linux-x64.zip"
+  arm64:
+    release_pattern: "bun-linux-aarch64.zip"
