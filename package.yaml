@@ -2,6 +2,7 @@
 
 package_name: bun
 github_repo: oven-sh/bun
+license: NOASSERTION
 artifact_format: zip
 description: "Incredibly fast JavaScript runtime, bundler, test runner, and package manager - all in one"
 
