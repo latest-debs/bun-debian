@@ -78,18 +78,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build:
-    name: Build (${{ matrix.arch }})
+    name: Build
     needs: prepare
     if: needs.prepare.outputs.should_build == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: amd64
-            runner: ubuntu-24.04
-          - arch: arm64
-            runner: ubuntu-24.04-arm
-    runs-on: ${{ matrix.runner }}
+    # Native arm64 runner: arm64 is the Raspberry Pi audience's architecture
+    # and the bulk of this channel's consumers. Building on arm64 hardware
+    # (instead of cross-packaging on x64) is faster and validates arm64
+    # natively; the builder packages every architecture either way.
+    runs-on: ubuntu-24.04-arm
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -98,8 +94,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /tmp/download_cache
-          key: download-${{ matrix.arch }}-${{ needs.prepare.outputs.version }}
-          restore-keys: download-${{ matrix.arch }}-
+          key: download-bun-${{ needs.prepare.outputs.version }}
+          restore-keys: download-bun-
 
       - name: Cache apt archives
         uses: actions/cache@v4
@@ -119,7 +115,7 @@ jobs:
           config-file: 'package.yaml'
           version: ${{ needs.prepare.outputs.version }}
           build-version: ${{ needs.prepare.outputs.build_version }}
-          architecture: ${{ matrix.arch }}
+          architecture: ${{ inputs.architecture }}
           lintian-check: ${{ inputs.enable_lintian }}
           # Provenance pin recorded at vet time (add-package.sh scaffold).
           # The builder verifies the downloaded upstream bytes against the
@@ -135,14 +131,14 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: build-summary-${{ matrix.arch }}
+          name: build-summary
           path: build-summary.json
           if-no-files-found: ignore
 
       - name: Upload packages
         uses: actions/upload-artifact@v4
         with:
-          name: bun-debian-packages-${{ matrix.arch }}
+          name: bun-debian-packages
           path: |
             bun_*.deb
             *.dsc
@@ -151,23 +147,18 @@ jobs:
           if-no-files-found: error
 
   smoke:
-    name: Smoke Test (${{ matrix.arch }})
+    name: Smoke Test
     needs: [prepare, build]
     if: needs.build.result == 'success'
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: amd64
-            runner: ubuntu-24.04
-          - arch: arm64
-            runner: ubuntu-24.04-arm
-    runs-on: ${{ matrix.runner }}
+    # Runs the packaged arm64 binaries on native arm64 hardware (same
+    # architecture as Raspberry Pi), so the smoke gate exercises exactly what
+    # the Pi audience runs - no emulation, real runtime coverage.
+    runs-on: ubuntu-24.04-arm
     steps:
       - name: Download packages
         uses: actions/download-artifact@v4
         with:
-          name: bun-debian-packages-${{ matrix.arch }}
+          name: bun-debian-packages
 
       - name: Run binaries from the built package
         run: |
@@ -183,10 +174,9 @@ jobs:
           # suites.json first, then run apt-repo's rollout-autowatch.sh to
           # fan this template out to every *-debian repo in one pass, rather
           # than hand-editing this list here or in any generated copy.
-          ARCH="${{ matrix.arch }}"
           DEB="" SUITE=""
           for suite in bullseye bookworm trixie forky sid; do
-            mapfile -t debs < <(compgen -G "bun_*+${suite}_${ARCH}.deb")
+            mapfile -t debs < <(compgen -G "bun_*+${suite}_arm64.deb")
             if [ -n "${debs[0]:-}" ]; then
               DEB="${debs[0]}"
               SUITE="$suite"
@@ -194,7 +184,7 @@ jobs:
             fi
           done
           if [ -z "$DEB" ]; then
-            echo "::notice::No $ARCH package available to smoke test; skipping"
+            echo "::notice::No arm64 package available to smoke test; skipping"
             exit 0
           fi
           EXPECTED="${{ needs.prepare.outputs.version }}"
@@ -251,10 +241,10 @@ jobs:
             bash -c "$smoke_script" _ /pkg.deb "$EXPECTED" "${bin_names[@]}" 2>&1)" || true
           echo "$out"
           if ! echo "$out" | grep -q "^ALL_OK$"; then
-            echo "::error::Smoke test failed on $SUITE/$ARCH (expected version $EXPECTED)"
+            echo "::error::Smoke test failed on $SUITE (expected version $EXPECTED)"
             exit 1
           fi
-          echo "All binaries passed the smoke test ($ARCH)"
+          echo "All binaries passed the smoke test"
 
   release:
     name: Release
@@ -265,7 +255,7 @@ jobs:
       - name: Download packages
         uses: actions/download-artifact@v4
         with:
-          name: bun-debian-packages-${{ matrix.arch }}
+          name: bun-debian-packages
 
       - name: Gate duplicate release tags
         # Refuse to (re)publish a release tag that already exists - published
