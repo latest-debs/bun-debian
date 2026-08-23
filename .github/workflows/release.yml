@@ -94,9 +94,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Build bun (${{ matrix.arch }})
+      - name: Build bun
         uses: ranjithrajv/debian-multiarch-builder@v.0.1a23
         env:
+          # Authenticate GitHub API calls from the builder; anonymous calls
+          # from shared runner IPs are rate-limited (60/h) and caused
+          # architecture detection to find zero release assets.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           config-file: 'package.yaml'
@@ -104,9 +107,17 @@ jobs:
           build-version: ${{ needs.prepare.outputs.build_version }}
           architecture: ${{ matrix.arch }}
           lintian-check: ${{ inputs.enable_lintian }}
+          # Provenance pin recorded at vet time (add-package.sh scaffold).
+          # The builder verifies the downloaded upstream bytes against the
+          # pinned SHA-256 when the release matches the vetted version, so a
+          # release altered after vetting fails the build instead of being
+          # silently packaged.
           pinned-metadata: ${{ github.workspace }}/.github/release-metadata.json
 
       - name: Upload builder summary on failure
+        # The builder writes build-summary.json (structured failure data) on
+        # both success and failure; persist it so the failure reporter can
+        # fold it into the notification instead of anyone scraping logs.
         if: failure()
         uses: actions/upload-artifact@v4
         with:
@@ -142,15 +153,25 @@ jobs:
       - name: Download packages
         uses: actions/download-artifact@v4
         with:
-          pattern: bun-debian-packages-${{ matrix.arch }}
-          merge-multiple: true
+          name: bun-debian-packages-${{ matrix.arch }}
 
       - name: Run binaries from the built package
         run: |
           set -euo pipefail
+          # Smoke-test the oldest available suite (bullseye first, then
+          # bookworm, trixie, forky, sid) so packages that intentionally skip
+          # a suite (e.g. atuin requiring a newer glibc than bookworm ships)
+          # still get runtime coverage on the oldest suite they do build.
+          #
+          # This list is a copy: it runs in this repo's own isolated CI, with
+          # no access to apt-repo's filesystem, so it can't read
+          # apt-repo/suites.json (the canonical source) directly. Update
+          # suites.json first, then run apt-repo's rollout-autowatch.sh to
+          # fan this template out to every *-debian repo in one pass, rather
+          # than hand-editing this list here or in any generated copy.
           ARCH="${{ matrix.arch }}"
           DEB="" SUITE=""
-          for suite in bookworm trixie forky sid; do
+          for suite in bullseye bookworm trixie forky sid; do
             mapfile -t debs < <(compgen -G "bun_*+${suite}_${ARCH}.deb")
             if [ -n "${debs[0]:-}" ]; then
               DEB="${debs[0]}"
@@ -163,12 +184,28 @@ jobs:
             exit 0
           fi
           EXPECTED="${{ needs.prepare.outputs.version }}"
-          EXPECTED="${EXPECTED#bun-v}"
+          # Some upstreams (e.g. oven-sh/bun) tag releases as
+          # "<pkgname>-vX.Y.Z" instead of plain "vX.Y.Z" - strip that prefix
+          # before the leading v, or EXPECTED stays "bun-v1.4.0" while the
+          # binary's actual --version output is just "1.4.0" and the grep
+          # below never matches.
           EXPECTED="${EXPECTED#bun-}"
           EXPECTED="${EXPECTED#v}"
           rm -rf smoke-root
           dpkg-deb -x "$DEB" smoke-root
           mapfile -t bin_names < <(basename -a smoke-root/usr/bin/*)
+          # Actually install the .deb (not just extract + mount usr/bin) so
+          # this exercises what a real `apt install` does: bundle-mode
+          # packages symlink /usr/bin/<name> to an ABSOLUTE path under
+          # /usr/lib/<package>/ (e.g. pnpm, zed), which only resolves once
+          # the package is installed at its real root - mounting just
+          # usr/bin left those as dangling symlinks. Installing also
+          # exercises any Depends: the package declares (e.g. pnpm needs
+          # libatomic1), catching a missing runtime dependency here instead
+          # of shipping a package that crashes for every user.
+          # shellcheck disable=SC2016 # intentionally unexpanded here - this
+          # string is handed to a nested `bash -c` invocation below, which
+          # is what expands $1/$name/$out/etc., not this outer shell.
           smoke_script='set -e
           apt-get update -qq
           apt-get install -y -qq "$1" >/dev/null
@@ -186,6 +223,16 @@ jobs:
             [ "$ok" = 1 ] || { echo "SMOKE_FAIL:$name"; exit 1; }
           done
           echo "ALL_OK"'
+          # The outer `set -e` would otherwise kill this script the instant
+          # docker run exits non-zero - before $out ever gets echoed, losing
+          # the actual diagnostic. Capture the exit status explicitly so a
+          # real failure (SMOKE_FAIL, a crashed binary, apt-get install
+          # itself failing) still prints what happened.
+          #
+          # ZED_ALLOW_ROOT: some binaries (zed) refuse to run as root as a
+          # deliberate safety guard - harmless no-op for every package that
+          # doesn't check for it, needed for the ones that do since this
+          # container always runs as root.
           out="$(docker run --rm -e ZED_ALLOW_ROOT=true -v "$PWD/$DEB:/pkg.deb:ro" debian:$SUITE \
             bash -c "$smoke_script" _ /pkg.deb "$EXPECTED" "${bin_names[@]}" 2>&1)" || true
           echo "$out"
@@ -204,8 +251,7 @@ jobs:
       - name: Download packages
         uses: actions/download-artifact@v4
         with:
-          pattern: bun-debian-packages-*
-          merge-multiple: true
+          name: bun-debian-packages-${{ matrix.arch }}
 
       - name: Gate duplicate release tags
         # Refuse to (re)publish a release tag that already exists - published
