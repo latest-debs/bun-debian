@@ -167,6 +167,8 @@ jobs:
             exit 0
           fi
           EXPECTED="${{ needs.prepare.outputs.version }}"
+          EXPECTED="${EXPECTED#bun-v}"
+          EXPECTED="${EXPECTED#bun-}"
           EXPECTED="${EXPECTED#v}"
           rm -rf smoke-root
           dpkg-deb -x "$DEB" smoke-root
