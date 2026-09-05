@@ -15,3 +15,10 @@ architectures:
     release_pattern: "bun-linux-x64.zip"
   arm64:
     release_pattern: "bun-linux-aarch64.zip"
+
+# Opt into native Ubuntu builds (builder >= v.0.1a29). Packages without
+# these are served from the Debian suites via the alias fallback.
+ubuntu_distributions:
+  - jammy
+  - noble
+  - resolute
